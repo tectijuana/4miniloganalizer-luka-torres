@@ -1,265 +1,272 @@
-/*
-Autor: Equipo docente (base para estudiantes)
-Curso: Arquitectura de Computadoras / Ensamblador ARM64
-Práctica: Mini Cloud Log Analyzer (Bash + ARM64 + GNU Make)
-Fecha: 20 de abril de 2026
-Descripción: Lee códigos HTTP desde stdin (uno por línea), clasifica 2xx/4xx/5xx
-             y muestra un reporte en español usando únicamente syscalls Linux.
-*/
+// ╔══════════════════════════════════════════════════════════════════════╗
+// ║   (≧ω≦)ノ 🌸 ANIME DEV ARC: ASM QUEST 🌸 ヽ(≧ω≦)                     ║
+// ╠══════════════════════════════════════════════════════════════════════╣
+// ║  Asignatura : Lenguajes de Interfaz en TECNM Campus ITT              ║
+// ║  Autor      : Torres Sanchez Luka Leonardo Jesus                     ║
+// ║  Fecha      : 2026/04/21                                             ║
+// ║  Hora       : 04:00 pm                                               ║
+// ║                                                                      ║
+// ║  Descripción:                                                        ║
+// ║  Práctica 4.2 - Mini Cloud Log Analyzer en ARM64 Assembly            ║
+// ║  Variante B: Determinar el código de estado más frecuente.           ║
+// ║                                                                      ║
+// ╠══════════════════════════════════════════════════════════════════════╣
+// ║     ⚔️  ASM (poder oculto) + Bash (control) + Make (invocación) ⚔️   ║
+// ║                                                                      ║
+// ║     (づ◡﹏◡)づ  "Lee logs, cuenta ocurrencias y revela el campeón"    ║
+// ║                                                                      ║
+// ║     ✨ Nivel 4.2: Práctica ARM64 - Análisis de Logs ✨                ║
+// ╚══════════════════════════════════════════════════════════════════════╝
 
 /*
-PSEUDOCÓDIGO (guía didáctica)
-1) Inicializar contadores en 0: exitos_2xx, errores_4xx, errores_5xx.
-2) Mientras haya bytes por leer en stdin:
-   2.1) Leer un bloque con syscall read.
-   2.2) Recorrer byte por byte.
-   2.3) Si el byte es dígito, acumular numero_actual = numero_actual * 10 + dígito.
-   2.4) Si el byte es '\n', clasificar numero_actual y reiniciar acumulador.
-3) Si el flujo termina sin '\n' final y hay número pendiente, clasificarlo.
-4) Imprimir resultados en español con syscall write.
+PSEUDOCÓDIGO - Variante B
+1) Inicializar tabla de frecuencias vacía (arreglo de pares código/conteo).
+2) Mientras haya bytes en stdin:
+   2.1) Leer bloque con syscall read.
+   2.2) Recorrer byte a byte.
+   2.3) Si es dígito, acumular numero_actual = numero_actual * 10 + dígito.
+   2.4) Si es '\n', buscar el código en la tabla:
+        - Si existe, incrementar su conteo.
+        - Si no existe, agregar nueva entrada con conteo 1.
+3) Al terminar, recorrer la tabla y encontrar la entrada con mayor conteo.
+4) Imprimir el código más frecuente y cuántas veces apareció.
 5) Salir con código 0.
-
-TODO (extensión para estudiantes):
-- Agregar manejo de códigos no válidos y contarlos.
-- Implementar variantes B, C, D y E en ramas separadas.
-- Mostrar porcentaje de éxito respecto al total.
 */
 
-.equ SYS_read,   63
-.equ SYS_write,  64
-.equ SYS_exit,   93
-.equ STDIN_FD,    0
-.equ STDOUT_FD,   1
+.equ SYS_read,    63
+.equ SYS_write,   64
+.equ SYS_exit,    93
+.equ STDIN_FD,     0
+.equ STDOUT_FD,    1
+.equ MAX_CODIGOS,  64
 
 .section .bss
-    .align 4
-buffer:         .skip 4096
-num_buf:        .skip 32      // Buffer para imprimir enteros en texto
+    .align 8
+buffer:        .skip 4096
+num_buf:       .skip 32
+tabla_codigos: .skip 1024
+num_entradas:  .skip 8
 
 .section .data
-msg_titulo:         .asciz "=== Mini Cloud Log Analyzer ===\n"
-msg_2xx:            .asciz "Éxitos 2xx: "
-msg_4xx:            .asciz "Errores 4xx: "
-msg_5xx:            .asciz "Errores 5xx: "
-msg_fin_linea:      .asciz "\n"
+msg_titulo:  .asciz "=== Mini Cloud Log Analyzer ===\n"
+msg_freq:    .asciz "Codigo mas frecuente: "
+msg_veces:   .asciz " veces: "
+msg_nl:      .asciz "\n"
 
 .section .text
 .global _start
 
 _start:
-    // Contadores principales
-    mov x19, #0                  // exitos_2xx
-    mov x20, #0                  // errores_4xx
-    mov x21, #0                  // errores_5xx
-
-    // Estado del parser
-    mov x22, #0                  // numero_actual
-    mov x23, #0                  // tiene_digitos (0/1)
+    adrp x0, num_entradas
+    add  x0, x0, :lo12:num_entradas
+    str  xzr, [x0]
+    mov  x19, #0
+    mov  x20, #0
 
 leer_bloque:
-    // read(STDIN_FD, buffer, 4096)
-    mov x0, #STDIN_FD
+    mov  x0, #STDIN_FD
     adrp x1, buffer
-    add x1, x1, :lo12:buffer
-    mov x2, #4096
-    mov x8, #SYS_read
-    svc #0
-
-    // x0 = bytes leídos
-    cmp x0, #0
-    beq fin_lectura               // EOF
-    blt salida_error              // error de lectura
-
-    mov x24, #0                   // índice i = 0
-    mov x25, x0                   // total bytes en bloque
+    add  x1, x1, :lo12:buffer
+    mov  x2, #4096
+    mov  x8, #SYS_read
+    svc  #0
+    cmp  x0, #0
+    beq  fin_lectura
+    blt  salida_error
+    mov  x22, #0
+    mov  x23, x0
 
 procesar_byte:
-    cmp x24, x25
+    cmp  x22, x23
     b.ge leer_bloque
-
     adrp x1, buffer
-    add x1, x1, :lo12:buffer
-    ldrb w26, [x1, x24]
-    add x24, x24, #1
-
-    // Si es salto de línea, clasificar número actual
-    cmp w26, #10                  // '\n'
+    add  x1, x1, :lo12:buffer
+    ldrb w24, [x1, x22]
+    add  x22, x22, #1
+    cmp  w24, #10
     b.eq fin_numero
-
-    // Si es dígito ('0'..'9'), acumular
-    cmp w26, #'0'
+    cmp  w24, #48
     b.lt procesar_byte
-    cmp w26, #'9'
+    cmp  w24, #57
     b.gt procesar_byte
-
-    // numero_actual = numero_actual * 10 + (byte - '0')
-    mov x27, #10
-    mul x22, x22, x27
-    sub w26, w26, #'0'
-    uxtw x26, w26
-    add x22, x22, x26
-    mov x23, #1
-    b procesar_byte
+    mov  x25, #10
+    mul  x19, x19, x25
+    sub  w24, w24, #48
+    uxtw x24, w24
+    add  x19, x19, x24
+    mov  x20, #1
+    b    procesar_byte
 
 fin_numero:
-    // Solo clasificar si efectivamente hubo al menos un dígito
-    cbz x23, reiniciar_numero
+    cbz  x20, reiniciar_num
+    mov  x0, x19
+    bl   registrar_codigo
 
-    mov x0, x22
-    bl clasificar_codigo
-
-reiniciar_numero:
-    mov x22, #0
-    mov x23, #0
-    b procesar_byte
+reiniciar_num:
+    mov  x19, #0
+    mov  x20, #0
+    b    procesar_byte
 
 fin_lectura:
-    // EOF con número pendiente (sin '\n' final)
-    cbz x23, imprimir_reporte
-    mov x0, x22
-    bl clasificar_codigo
+    cbz  x20, buscar_maximo
+    mov  x0, x19
+    bl   registrar_codigo
 
-imprimir_reporte:
-    // Encabezado
+buscar_maximo:
+    adrp x5, num_entradas
+    add  x5, x5, :lo12:num_entradas
+    ldr  x21, [x5]
+    mov  x26, #0
+    mov  x27, #0
+    mov  x28, #0
+    cbz  x21, imprimir
+
+loop_tabla:
+    cmp  x28, x21
+    b.ge imprimir
+    adrp x0, tabla_codigos
+    add  x0, x0, :lo12:tabla_codigos
+    mov  x1, x28
+    lsl  x1, x1, #4
+    add  x0, x0, x1
+    ldr  x2, [x0]
+    ldr  x3, [x0, #8]
+    cmp  x3, x27
+    b.le no_actualizar
+    mov  x26, x2
+    mov  x27, x3
+
+no_actualizar:
+    add  x28, x28, #1
+    b    loop_tabla
+
+imprimir:
     adrp x0, msg_titulo
-    add x0, x0, :lo12:msg_titulo
-    bl write_cstr
-
-    // "Éxitos 2xx: " + valor + "\n"
-    adrp x0, msg_2xx
-    add x0, x0, :lo12:msg_2xx
-    bl write_cstr
-    mov x0, x19
-    bl print_uint
-    adrp x0, msg_fin_linea
-    add x0, x0, :lo12:msg_fin_linea
-    bl write_cstr
-
-    // "Errores 4xx: " + valor + "\n"
-    adrp x0, msg_4xx
-    add x0, x0, :lo12:msg_4xx
-    bl write_cstr
-    mov x0, x20
-    bl print_uint
-    adrp x0, msg_fin_linea
-    add x0, x0, :lo12:msg_fin_linea
-    bl write_cstr
-
-    // "Errores 5xx: " + valor + "\n"
-    adrp x0, msg_5xx
-    add x0, x0, :lo12:msg_5xx
-    bl write_cstr
-    mov x0, x21
-    bl print_uint
-    adrp x0, msg_fin_linea
-    add x0, x0, :lo12:msg_fin_linea
-    bl write_cstr
+    add  x0, x0, :lo12:msg_titulo
+    bl   write_cstr
+    adrp x0, msg_freq
+    add  x0, x0, :lo12:msg_freq
+    bl   write_cstr
+    mov  x0, x26
+    bl   print_uint
+    adrp x0, msg_veces
+    add  x0, x0, :lo12:msg_veces
+    bl   write_cstr
+    mov  x0, x27
+    bl   print_uint
+    adrp x0, msg_nl
+    add  x0, x0, :lo12:msg_nl
+    bl   write_cstr
 
 salida_ok:
-    mov x0, #0
-    mov x8, #SYS_exit
-    svc #0
+    mov  x0, #0
+    mov  x8, #SYS_exit
+    svc  #0
 
 salida_error:
-    mov x0, #1
-    mov x8, #SYS_exit
-    svc #0
+    mov  x0, #1
+    mov  x8, #SYS_exit
+    svc  #0
 
-// -----------------------------------------------------------------------------
-// clasificar_codigo(x0 = codigo_http)
-// Incrementa el contador correspondiente: 2xx, 4xx o 5xx.
-// -----------------------------------------------------------------------------
-clasificar_codigo:
-    cmp x0, #200
-    b.lt clasificar_fin
-    cmp x0, #299
-    b.gt revisar_4xx
-    add x19, x19, #1
-    b clasificar_fin
+registrar_codigo:
+    stp  x29, x30, [sp, #-32]!
+    stp  x22, x23, [sp, #16]
+    mov  x29, x0
+    adrp x6, num_entradas
+    add  x6, x6, :lo12:num_entradas
+    ldr  x21, [x6]
+    mov  x22, #0
 
-revisar_4xx:
-    cmp x0, #400
-    b.lt clasificar_fin
-    cmp x0, #499
-    b.gt revisar_5xx
-    add x20, x20, #1
-    b clasificar_fin
+rc_buscar:
+    cmp  x22, x21
+    b.ge rc_agregar
+    adrp x1, tabla_codigos
+    add  x1, x1, :lo12:tabla_codigos
+    mov  x2, x22
+    lsl  x2, x2, #4
+    add  x1, x1, x2
+    ldr  x3, [x1]
+    cmp  x3, x29
+    b.ne rc_siguiente
+    ldr  x4, [x1, #8]
+    add  x4, x4, #1
+    str  x4, [x1, #8]
+    b    rc_fin
 
-revisar_5xx:
-    cmp x0, #500
-    b.lt clasificar_fin
-    cmp x0, #599
-    b.gt clasificar_fin
-    add x21, x21, #1
+rc_siguiente:
+    add  x22, x22, #1
+    b    rc_buscar
 
-clasificar_fin:
+rc_agregar:
+    mov  x3, #MAX_CODIGOS
+    cmp  x21, x3
+    b.ge rc_fin
+    adrp x1, tabla_codigos
+    add  x1, x1, :lo12:tabla_codigos
+    mov  x2, x21
+    lsl  x2, x2, #4
+    add  x1, x1, x2
+    str  x29, [x1]
+    mov  x3, #1
+    str  x3,  [x1, #8]
+    add  x21, x21, #1
+    str  x21, [x6]
+
+rc_fin:
+    ldp  x22, x23, [sp, #16]
+    ldp  x29, x30, [sp], #32
     ret
 
-// -----------------------------------------------------------------------------
-// write_cstr(x0 = puntero a string terminado en '\0')
-// Imprime una cadena C usando syscall write.
-// -----------------------------------------------------------------------------
 write_cstr:
-    mov x9, x0                    // guardar puntero inicial
-    mov x10, #0                   // longitud = 0
-
-wc_len_loop:
+    mov  x9, x0
+    mov  x10, #0
+wc_loop:
     ldrb w11, [x9, x10]
-    cbz w11, wc_len_done
-    add x10, x10, #1
-    b wc_len_loop
-
-wc_len_done:
-    mov x1, x9                    // buffer
-    mov x2, x10                   // tamaño
-    mov x0, #STDOUT_FD            // fd
-    mov x8, #SYS_write
-    svc #0
+    cbz  w11, wc_done
+    add  x10, x10, #1
+    b    wc_loop
+wc_done:
+    mov  x1, x9
+    mov  x2, x10
+    mov  x0, #STDOUT_FD
+    mov  x8, #SYS_write
+    svc  #0
     ret
 
-// -----------------------------------------------------------------------------
-// print_uint(x0 = entero sin signo)
-// Convierte a ASCII en base 10 e imprime con syscall write.
-// -----------------------------------------------------------------------------
 print_uint:
-    // Caso especial: número 0
-    cbnz x0, pu_convertir
+    cbnz x0, pu_conv
     adrp x1, num_buf
-    add x1, x1, :lo12:num_buf
-    mov w2, #'0'
+    add  x1, x1, :lo12:num_buf
+    mov  w2, #48
     strb w2, [x1]
-    mov x0, #STDOUT_FD
-    mov x2, #1
-    mov x8, #SYS_write
-    svc #0
+    mov  x0, #STDOUT_FD
+    mov  x2, #1
+    mov  x8, #SYS_write
+    svc  #0
     ret
 
-pu_convertir:
+pu_conv:
     adrp x12, num_buf
-    add x12, x12, :lo12:num_buf
-    add x12, x12, #31             // escribir de atrás hacia adelante
-    mov w13, #0
-    strb w13, [x12]               // terminador no indispensable, útil para depurar
-
-    mov x14, #10
-    mov x15, #0                   // contador de dígitos
+    add  x12, x12, :lo12:num_buf
+    add  x12, x12, #31
+    mov  w13, #0
+    strb w13, [x12]
+    mov  x14, #10
+    mov  x15, #0
 
 pu_loop:
-    udiv x16, x0, x14             // x16 = x0 / 10
-    msub x17, x16, x14, x0        // x17 = x0 - (x16*10) => residuo
-    add x17, x17, #'0'
-
-    sub x12, x12, #1
+    udiv x16, x0, x14
+    msub x17, x16, x14, x0
+    add  x17, x17, #48
+    sub  x12, x12, #1
     strb w17, [x12]
-    add x15, x15, #1
-
-    mov x0, x16
+    add  x15, x15, #1
+    mov  x0, x16
     cbnz x0, pu_loop
-
-    // write(STDOUT_FD, x12, x15)
-    mov x1, x12
-    mov x2, x15
-    mov x0, #STDOUT_FD
-    mov x8, #SYS_write
-    svc #0
+    mov  x1, x12
+    mov  x2, x15
+    mov  x0, #STDOUT_FD
+    mov  x8, #SYS_write
+    svc  #0
     ret
+
