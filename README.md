@@ -135,28 +135,18 @@ make
 ```
 
 ---
----
 
-## Ejecución por dataset
+---
+## Prueba con dataset grande — MOCK_DATA.csv
+
+Se incluyó un dataset de **1000 códigos HTTP reales** para validar el programa bajo carga mayor:
 
 ```bash
-cat data/logs_A.txt | ./analyzer
-# Codigo mas frecuente: 200 veces: 2
-
-cat data/logs_B.txt | ./analyzer
-# Codigo mas frecuente: 404 veces: 5
-
-cat data/logs_C.txt | ./analyzer
-# Codigo mas frecuente: 200 veces: 3
-
-cat data/logs_D.txt | ./analyzer
-# Codigo mas frecuente: 200 veces: 2
-
-cat data/logs_E.txt | ./analyzer
-# Codigo mas frecuente: 200 veces: 4
+cat data/MOCK_DATA.csv | ./analyzer
 ```
 
 ---
+El código `200 OK` fue el más frecuente con **181 apariciones** de 1000 registros, lo cual es consistente con el comportamiento real de servidores web donde la mayoría de peticiones son exitosas.
 
 ## Pruebas automáticas
 
