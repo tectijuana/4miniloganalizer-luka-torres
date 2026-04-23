@@ -89,16 +89,9 @@ PSEUDOCÓDIGO - Variante B
 
 ## Evidencia de ejecución
 
-[![asciicast](https://asciinema.org/a/ElmAgqrItiHRsv5g.svg)](https://asciinema.org/a/ElmAgqrItiHRsv5g)
-
+[![asciicast](https://asciinema.org/a/n4W2SfH4GOSXCrkc.svg)](https://asciinema.org/a/n4W2SfH4GOSXCrkc)
 ---
 
----
-## Evidencia de ejecución con los 1000 datos
-
-[![asciicast](https://asciinema.org/a/YVOBIUbtzAfaGnZY.svg)](https://asciinema.org/a/YVOBIUbtzAfaGnZY)
-
----
 ### Funciones implementadas
 
 | Función            | Descripción                                                    |
