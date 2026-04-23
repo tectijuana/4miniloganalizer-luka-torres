@@ -93,6 +93,12 @@ PSEUDOCÓDIGO - Variante B
 
 ---
 
+---
+## Evidencia de ejecución con los 1000 datos
+
+[![asciicast](https://asciinema.org/a/YVOBIUbtzAfaGnZY.svg)](https://asciinema.org/a/YVOBIUbtzAfaGnZY)
+
+---
 ### Funciones implementadas
 
 | Función            | Descripción                                                    |
